@@ -94,6 +94,8 @@ test('track.visitor() posts to /track/visitor with org_id and page context', asy
     assert.equal(body.org_id, 'org-42');
     assert.equal(body.page_url, 'https://example-shop.test/checkout');
     assert.equal(body.fingerprint_hash, window.ZeroAI.visitorId);
+    assert.equal(fetchCalls[0].init.headers['X-Client-Name'], 'boss-js-sdk');
+    assert.equal(fetchCalls[0].init.headers['X-Client-Version'], window.ZeroAI.version);
 });
 
 test('track.event() uses sendBeacon, not fetch, so it survives page unload', async () => {

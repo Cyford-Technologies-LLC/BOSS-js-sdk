@@ -29,6 +29,10 @@
     }
 
     var STORAGE_KEY = 'zeroai_visitor_id';
+    // Bump alongside the git tag/CHANGELOG entry on every release - sent as X-Client-Version
+    // on fetch-based requests so BOSS can see which SDK version is actually in use (BOSS
+    // project 43 feature #113). Single source of truth - sdk.version below reads this too.
+    var SDK_VERSION = '0.1.0';
     var readyCallbacks = [];
     var isReady = false;
 
@@ -149,7 +153,14 @@
 
         return fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            // X-Client-Name/X-Client-Version identify this SDK+version (BOSS project 43 feature
+            // #113) - only reaches the fetch path since the Beacon API (used above when
+            // available) does not support custom headers. NOTE: as of 2026-08-29,
+            // Kernel::isStorageLightRoute() skips usage logging entirely for public_system
+            // routes (everything /track/* uses) for volume/cost reasons, so these headers do
+            // not yet produce visible usage stats - that requires a separate, deliberate
+            // decision to record light-route usage, not assumed here.
+            headers: { 'Content-Type': 'application/json', 'X-Client-Name': 'boss-js-sdk', 'X-Client-Version': SDK_VERSION },
             body: body,
             keepalive: true, // survives a page unload shortly after the call
         }).catch(function (err) {
@@ -199,7 +210,7 @@
 
         var sdk = {
             __bossEmbed: true,
-            version: '0.1.0',
+            version: SDK_VERSION,
             config: config,
             visitorId: visitorId,
 
