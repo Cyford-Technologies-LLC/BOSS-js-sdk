@@ -66,6 +66,7 @@
             modules: modulesRaw === 'auto' ? ['auto'] : modulesRaw.split(',').map(trim),
             locale: data.locale || (navigator.language || 'en'),
             theme: parseThemeTokens(data),
+            chatAgentId: data.chatAgentId || '',
         };
     }
 
@@ -269,6 +270,142 @@
         return out;
     }
 
+    // ---- Chat widget -----------------------------------------------------------
+
+    function chatFrameUrl(config, visitorId) {
+        // Strip /api/v2 suffix to derive the BOSS web origin (same host, different path).
+        var base = config.baseUrl.replace(/\/api\/v2\/?$/, '');
+        var url = base + '/widget/chat.php'
+            + '?client_id=' + encodeURIComponent(config.clientId)
+            + '&org_id=' + encodeURIComponent(config.orgId)
+            + '&locale=' + encodeURIComponent(config.locale)
+            + '&visitor_id=' + encodeURIComponent(visitorId);
+        if (config.chatAgentId) {
+            url += '&agent_id=' + encodeURIComponent(config.chatAgentId);
+        }
+        return url;
+    }
+
+    function buildChatWidget(config, sdk) {
+        var LAUNCH_ID = 'zeroai-chat-launcher';
+        var OVERLAY_ID = 'zeroai-chat-overlay';
+        var isOpen = false;
+        var launcherEl = null;
+        var overlayEl = null;
+        var iframeEl = null;
+        var mounted = false;
+
+        function mount() {
+            if (mounted || document.getElementById(LAUNCH_ID)) {
+                return;
+            }
+            mounted = true;
+
+            launcherEl = document.createElement('button');
+            launcherEl.id = LAUNCH_ID;
+            launcherEl.type = 'button';
+            launcherEl.setAttribute('aria-label', 'Open chat');
+            launcherEl.setAttribute('aria-expanded', 'false');
+            launcherEl.setAttribute('aria-haspopup', 'dialog');
+            launcherEl.style.cssText = [
+                'position:fixed', 'bottom:20px', 'right:20px', 'z-index:2147483646',
+                'width:56px', 'height:56px', 'border-radius:50%', 'border:none',
+                'background:#6563ff', 'color:#fff', 'cursor:pointer',
+                'box-shadow:0 2px 12px rgba(0,0,0,.24)',
+                'display:flex', 'align-items:center', 'justify-content:center',
+                'padding:0', 'transition:transform .15s',
+            ].join(';');
+            launcherEl.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
+
+            overlayEl = document.createElement('div');
+            overlayEl.id = OVERLAY_ID;
+            overlayEl.setAttribute('role', 'dialog');
+            overlayEl.setAttribute('aria-label', 'Chat');
+            overlayEl.style.cssText = [
+                'position:fixed', 'bottom:84px', 'right:20px', 'z-index:2147483645',
+                'width:360px', 'height:520px', 'border-radius:12px',
+                'box-shadow:0 8px 32px rgba(0,0,0,.18)',
+                'overflow:hidden', 'display:none',
+                'border:1px solid rgba(0,0,0,.08)',
+            ].join(';');
+
+            iframeEl = document.createElement('iframe');
+            iframeEl.src = chatFrameUrl(config, sdk.visitorId);
+            iframeEl.title = 'Chat';
+            iframeEl.setAttribute('aria-label', 'Chat with us');
+            iframeEl.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+            iframeEl.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
+            overlayEl.appendChild(iframeEl);
+
+            document.body.appendChild(overlayEl);
+            document.body.appendChild(launcherEl);
+
+            launcherEl.addEventListener('click', toggle);
+            launcherEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggle();
+                }
+            });
+
+            // postMessage bridge: relay close/lead events from the iframe to the SDK.
+            window.addEventListener('message', function (evt) {
+                if (!iframeEl || evt.source !== iframeEl.contentWindow) {
+                    return;
+                }
+                var msg = evt.data;
+                if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
+                    return;
+                }
+                if (msg.type === 'zeroai:close') {
+                    close();
+                } else if (msg.type === 'zeroai:lead-captured') {
+                    sdk.track.bindLead(msg.payload || {});
+                }
+            });
+        }
+
+        function toggle() {
+            if (isOpen) {
+                close();
+            } else {
+                open();
+            }
+        }
+
+        function open() {
+            if (isOpen) {
+                return;
+            }
+            isOpen = true;
+            if (overlayEl) {
+                overlayEl.style.display = 'block';
+            }
+            if (launcherEl) {
+                launcherEl.setAttribute('aria-expanded', 'true');
+                launcherEl.style.transform = 'rotate(45deg)';
+            }
+            dispatchEvent(config, 'chat-opened', { visitorId: sdk.visitorId });
+        }
+
+        function close() {
+            if (!isOpen) {
+                return;
+            }
+            isOpen = false;
+            if (overlayEl) {
+                overlayEl.style.display = 'none';
+            }
+            if (launcherEl) {
+                launcherEl.setAttribute('aria-expanded', 'false');
+                launcherEl.style.transform = '';
+            }
+            dispatchEvent(config, 'chat-closed', {});
+        }
+
+        return { mount: mount, open: open, close: close, toggle: toggle };
+    }
+
     // ---- Bootstrap ------------------------------------------------------------
 
     function init() {
@@ -290,6 +427,17 @@
 
         var sdk = buildSdk(config);
         window.ZeroAI = sdk;
+
+        // Chat widget: mount when 'chat' or 'auto' module is enabled.
+        if (config.clientId && (config.modules.indexOf('auto') !== -1 || config.modules.indexOf('chat') !== -1)) {
+            var chatWidget = buildChatWidget(config, sdk);
+            sdk.chat = chatWidget;
+            if (document.body) {
+                chatWidget.mount();
+            } else {
+                document.addEventListener('DOMContentLoaded', chatWidget.mount);
+            }
+        }
 
         isReady = true;
         dispatchEvent(config, 'ready', { visitorId: sdk.visitorId });

@@ -9,7 +9,7 @@
     "dist"
   ],
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/embed.test.js test/chat.test.js"
   },
   "devDependencies": {
     "jsdom": "^25.0.1"
