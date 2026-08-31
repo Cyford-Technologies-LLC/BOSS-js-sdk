@@ -251,6 +251,31 @@ test('data-modules excluding auto/errors does not auto-hook window.onerror', asy
     assert.equal(fetchCalls.length, fetchCountBefore, 'no auto-hook installed when modules excludes errors/auto');
 });
 
+// BOSS project 43 feature #131 - funnels module fires funnel-step events to
+// the public POST /funnels/event/browser route (org_id in body, no credential).
+test('funnels.event() posts to /funnels/event/browser with event_type, fingerprint_hash, org_id', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    const fetchCountBefore = fetchCalls.length;
+    await window.ZeroAI.funnels.event('page_visit', { metadata: { url: 'https://example-shop.test/pricing' } });
+    assert.equal(fetchCalls.length, fetchCountBefore + 1);
+    const call = fetchCalls[fetchCalls.length - 1];
+    assert.equal(call.url, 'https://zeroaiboss.com/api/v2/funnels/event/browser');
+    const body = JSON.parse(call.init.body);
+    assert.equal(body.org_id, 'org-42');
+    assert.equal(body.event_type, 'page_visit');
+    assert.equal(body.fingerprint_hash, window.ZeroAI.visitorId);
+    assert.deepEqual(body.metadata, { url: 'https://example-shop.test/pricing' });
+});
+
+test('funnels.event() dispatches zeroai:error instead of throwing on a network failure', async () => {
+    const { window } = await loadEmbed({ 'client-id': 'org-42' });
+    window.fetch = () => Promise.reject(new Error('network down'));
+    let errorDetail = null;
+    window.document.addEventListener('zeroai:error', (e) => { errorDetail = e.detail; });
+    await window.ZeroAI.funnels.event('form_submit', {});
+    assert.equal(errorDetail.source, 'funnels');
+});
+
 test('loading the script twice on the same page is a no-op the second time', async () => {
     const { window } = await loadEmbed({ 'client-id': 'org-1' });
     const firstInstance = window.ZeroAI;

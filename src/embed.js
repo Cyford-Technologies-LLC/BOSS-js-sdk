@@ -32,7 +32,7 @@
     // Bump alongside the git tag/CHANGELOG entry on every release - sent as X-Client-Version
     // on fetch-based requests so BOSS can see which SDK version is actually in use (BOSS
     // project 43 feature #113). Single source of truth - sdk.version below reads this too.
-    var SDK_VERSION = '0.4.0';
+    var SDK_VERSION = '0.5.0';
     var readyCallbacks = [];
     var isReady = false;
 
@@ -404,6 +404,38 @@
         return { report: report, install: install };
     }
 
+    // ---- Funnels ----------------------------------------------------------------
+
+    // BOSS project 43 feature #131. POST /funnels/event/browser is the
+    // public_system sibling of dynamic/funnels.event - org_id in the body, no
+    // signed-client credential. The backend restricts event_type to
+    // page_visit/form_submit/field_changed/visitor_captured (rejecting
+    // lead_created/email_click/email_open/booking_event with a 422) since
+    // those read as authoritative signals a public caller must not be able to
+    // fabricate - this module intentionally does not re-validate that list
+    // client-side, it just passes through whatever the backend decides.
+    function buildFunnels(config, visitorId) {
+        return {
+            event: function (eventType, data) {
+                var payload = mergeTenantIdentity(config, mergeInto({
+                    event_type: eventType,
+                    fingerprint_hash: visitorId,
+                }, data || {}));
+                return fetch(config.baseUrl + '/funnels/event/browser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    keepalive: true,
+                })
+                    .then(function (r) { return r.json(); })
+                    .catch(function (err) {
+                        dispatchEvent(config, 'error', { source: 'funnels', message: String(err && err.message || err) });
+                        return null;
+                    });
+            },
+        };
+    }
+
     // ---- Chat widget -----------------------------------------------------------
 
     function chatFrameUrl(config, visitorId) {
@@ -567,6 +599,7 @@
         sdk.forms = buildForms(config, sdk);
         sdk.push = buildPush(config);
         sdk.errors = buildErrors(config);
+        sdk.funnels = buildFunnels(config, sdk.visitorId);
 
         // Auto-hook window.onerror/onunhandledrejection when 'errors' or 'auto' is
         // enabled - matches sdk.track.visitor's own 'tracking'/'auto' auto-fire
