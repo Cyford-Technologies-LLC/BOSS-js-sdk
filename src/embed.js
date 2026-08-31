@@ -32,7 +32,7 @@
     // Bump alongside the git tag/CHANGELOG entry on every release - sent as X-Client-Version
     // on fetch-based requests so BOSS can see which SDK version is actually in use (BOSS
     // project 43 feature #113). Single source of truth - sdk.version below reads this too.
-    var SDK_VERSION = '0.2.0';
+    var SDK_VERSION = '0.3.0';
     var readyCallbacks = [];
     var isReady = false;
 
@@ -67,6 +67,7 @@
             locale: data.locale || (navigator.language || 'en'),
             theme: parseThemeTokens(data),
             chatAgentId: data.chatAgentId || '',
+            companyId: data.companyId || '',
         };
     }
 
@@ -308,6 +309,31 @@
         };
     }
 
+    // ---- Web push -------------------------------------------------------------
+
+    // BOSS project 43 feature #128. GET /firebase/web-config is public_system - safe
+    // to call directly from a browser. GET-ting the config is as far as this SDK goes:
+    // registering the resulting FCM token BOSS-side (communications.devices.register)
+    // is bearer/session-only by design (a device-token registry is not something an
+    // anonymous embed should be able to write to), so the site's own backend must
+    // relay the token via the PHP SDK's communications()->registerDevice() - this SDK
+    // only hands back the config needed to obtain that token client-side via
+    // Firebase's own JS SDK (not bundled here, to keep this embed dependency-free).
+    function buildPush(config) {
+        return {
+            getWebConfig: function () {
+                var url = config.baseUrl + '/firebase/web-config?org_id=' + encodeURIComponent(config.orgId)
+                    + (config.companyId ? '&company_id=' + encodeURIComponent(config.companyId) : '');
+                return fetch(url)
+                    .then(function (r) { return r.json(); })
+                    .catch(function (err) {
+                        dispatchEvent(config, 'error', { source: 'push', message: String(err && err.message || err) });
+                        return null;
+                    });
+            },
+        };
+    }
+
     // ---- Chat widget -----------------------------------------------------------
 
     function chatFrameUrl(config, visitorId) {
@@ -466,9 +492,10 @@
         var sdk = buildSdk(config);
         window.ZeroAI = sdk;
 
-        // Forms module - always available, no separate opt-in module flag (matches
-        // sdk.track.* always being available regardless of data-modules).
+        // Forms/push modules - always available, no separate opt-in module flag
+        // (matches sdk.track.* always being available regardless of data-modules).
         sdk.forms = buildForms(config, sdk);
+        sdk.push = buildPush(config);
 
         // Chat widget: mount when 'chat' or 'auto' module is enabled.
         if (config.clientId && (config.modules.indexOf('auto') !== -1 || config.modules.indexOf('chat') !== -1)) {

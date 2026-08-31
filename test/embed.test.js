@@ -172,6 +172,23 @@ test('forms.submit() dispatches zeroai:error instead of throwing on a server-sid
     assert.equal(errorDetail.message, 'Field "Email" is required');
 });
 
+// BOSS project 43 feature #128 - push.getWebConfig() wraps the public
+// firebase.web_config route. Actual FCM registration is out of scope for this
+// SDK - see the comment above buildPush() in embed.js for why.
+test('push.getWebConfig() gets /firebase/web-config with org_id', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    await window.ZeroAI.push.getWebConfig();
+    const call = fetchCalls[fetchCalls.length - 1];
+    assert.equal(call.url, 'https://zeroaiboss.com/api/v2/firebase/web-config?org_id=org-42');
+});
+
+test('push.getWebConfig() includes company_id when data-company-id is set', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42', 'company-id': '18' });
+    await window.ZeroAI.push.getWebConfig();
+    const call = fetchCalls[fetchCalls.length - 1];
+    assert.equal(call.url, 'https://zeroaiboss.com/api/v2/firebase/web-config?org_id=org-42&company_id=18');
+});
+
 test('loading the script twice on the same page is a no-op the second time', async () => {
     const { window } = await loadEmbed({ 'client-id': 'org-1' });
     const firstInstance = window.ZeroAI;
