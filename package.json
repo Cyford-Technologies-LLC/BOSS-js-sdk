@@ -1,6 +1,6 @@
 {
   "name": "@zeroai/boss-js-sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "ZeroAI BOSS embeddable JS SDK - visitor tracking, marketing widgets, AI chat for third-party websites.",
   "private": true,
   "main": "src/embed.js",

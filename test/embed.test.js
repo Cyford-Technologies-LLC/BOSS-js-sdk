@@ -189,6 +189,68 @@ test('push.getWebConfig() includes company_id when data-company-id is set', asyn
     assert.equal(call.url, 'https://zeroaiboss.com/api/v2/firebase/web-config?org_id=org-42&company_id=18');
 });
 
+// BOSS project 43 feature #130 - errors module reports uncaught browser errors
+// to the public POST /errors/browser route (org_id in body, no credential).
+test('errors.report() posts to /errors/browser with title/message/context', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    const fetchCountBefore = fetchCalls.length;
+    await window.ZeroAI.errors.report({ title: 'Boom', message: 'Boom', file: 'app.js', line: 10 });
+    assert.equal(fetchCalls.length, fetchCountBefore + 1);
+    const call = fetchCalls[fetchCalls.length - 1];
+    assert.equal(call.url, 'https://zeroaiboss.com/api/v2/errors/browser');
+    const body = JSON.parse(call.init.body);
+    assert.equal(body.org_id, 'org-42');
+    assert.equal(body.title, 'Boom');
+    assert.equal(body.file, 'app.js');
+    assert.equal(body.line, 10);
+    assert.equal(body.severity, 'error');
+});
+
+test('window.onerror is auto-hooked under the default "auto" module', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    const fetchCountBefore = fetchCalls.length;
+    window.dispatchEvent(new window.ErrorEvent('error', {
+        message: 'Uncaught TypeError: x is not a function',
+        filename: 'https://example-shop.test/app.js',
+        lineno: 42,
+    }));
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(fetchCalls.length, fetchCountBefore + 1);
+    const body = JSON.parse(fetchCalls[fetchCalls.length - 1].init.body);
+    assert.equal(body.title, 'Uncaught TypeError: x is not a function');
+    assert.equal(body.file, 'https://example-shop.test/app.js');
+    assert.equal(body.line, 42);
+});
+
+test('unhandledrejection is auto-hooked and reports the rejection reason', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    const fetchCountBefore = fetchCalls.length;
+    const evt = new window.Event('unhandledrejection');
+    evt.reason = new window.Error('promise blew up');
+    window.dispatchEvent(evt);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(fetchCalls.length, fetchCountBefore + 1);
+    const body = JSON.parse(fetchCalls[fetchCalls.length - 1].init.body);
+    assert.equal(body.title, 'promise blew up');
+});
+
+test('errors.install() does not double-hook when called an extra time', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    window.ZeroAI.errors.install();
+    const fetchCountBefore = fetchCalls.length;
+    window.dispatchEvent(new window.ErrorEvent('error', { message: 'dup check' }));
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(fetchCalls.length, fetchCountBefore + 1, 'listener registered exactly once despite install() being called an extra time');
+});
+
+test('data-modules excluding auto/errors does not auto-hook window.onerror', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42', modules: 'tracking' });
+    const fetchCountBefore = fetchCalls.length;
+    window.dispatchEvent(new window.ErrorEvent('error', { message: 'should not be reported' }));
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(fetchCalls.length, fetchCountBefore, 'no auto-hook installed when modules excludes errors/auto');
+});
+
 test('loading the script twice on the same page is a no-op the second time', async () => {
     const { window } = await loadEmbed({ 'client-id': 'org-1' });
     const firstInstance = window.ZeroAI;

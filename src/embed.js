@@ -32,7 +32,7 @@
     // Bump alongside the git tag/CHANGELOG entry on every release - sent as X-Client-Version
     // on fetch-based requests so BOSS can see which SDK version is actually in use (BOSS
     // project 43 feature #113). Single source of truth - sdk.version below reads this too.
-    var SDK_VERSION = '0.3.0';
+    var SDK_VERSION = '0.4.0';
     var readyCallbacks = [];
     var isReady = false;
 
@@ -334,6 +334,76 @@
         };
     }
 
+    // ---- Errors ---------------------------------------------------------------
+
+    // BOSS project 43 feature #130. POST /errors/browser is the public_system
+    // sibling of the PHP SDK's errors()->report() - org_id/page context in the
+    // body, no signed-client credential needed, since a visitor's own browser
+    // has none. The backend always forces source_type=browser_js and ignores
+    // any project_link_id/project_id a caller might send (a public embed must
+    // never be able to attach a report to an arbitrary internal BOSS project),
+    // so this module doesn't bother exposing those fields at all.
+    function buildErrors(config) {
+        var installed = false;
+
+        function report(details) {
+            var d = details || {};
+            var payload = mergeTenantIdentity(config, {
+                title: d.title || '',
+                message: d.message || '',
+                file: d.file || '',
+                line: d.line || null,
+                stack_trace: d.stack || '',
+                severity: d.severity || 'error',
+                context: d.context || { url: window.location.href },
+                user_agent: navigator.userAgent,
+            });
+            if (config.companyId) {
+                payload.company_id = config.companyId;
+            }
+            return fetch(config.baseUrl + '/errors/browser', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                keepalive: true,
+            })
+                .then(function (r) { return r.json(); })
+                .catch(function () {
+                    // Deliberately no dispatchEvent(config, 'error', ...) here - a
+                    // page listening for zeroai:error to report ITS OWN errors
+                    // could otherwise recurse into itself via window.onerror.
+                    return null;
+                });
+        }
+
+        function install() {
+            if (installed) {
+                return;
+            }
+            installed = true;
+            window.addEventListener('error', function (evt) {
+                report({
+                    title: evt.message || 'Uncaught error',
+                    message: evt.message || '',
+                    file: evt.filename || '',
+                    line: evt.lineno || null,
+                    stack: (evt.error && evt.error.stack) || '',
+                });
+            });
+            window.addEventListener('unhandledrejection', function (evt) {
+                var reason = evt.reason;
+                var message = (reason && (reason.message || String(reason))) || 'Unhandled promise rejection';
+                report({
+                    title: message,
+                    message: message,
+                    stack: (reason && reason.stack) || '',
+                });
+            });
+        }
+
+        return { report: report, install: install };
+    }
+
     // ---- Chat widget -----------------------------------------------------------
 
     function chatFrameUrl(config, visitorId) {
@@ -496,6 +566,15 @@
         // (matches sdk.track.* always being available regardless of data-modules).
         sdk.forms = buildForms(config, sdk);
         sdk.push = buildPush(config);
+        sdk.errors = buildErrors(config);
+
+        // Auto-hook window.onerror/onunhandledrejection when 'errors' or 'auto' is
+        // enabled - matches sdk.track.visitor's own 'tracking'/'auto' auto-fire
+        // below. A page that wants manual-only reporting can set data-modules to
+        // exclude both and call sdk.errors.report() itself.
+        if (config.modules.indexOf('auto') !== -1 || config.modules.indexOf('errors') !== -1) {
+            sdk.errors.install();
+        }
 
         // Chat widget: mount when 'chat' or 'auto' module is enabled.
         if (config.clientId && (config.modules.indexOf('auto') !== -1 || config.modules.indexOf('chat') !== -1)) {
