@@ -32,7 +32,7 @@
     // Bump alongside the git tag/CHANGELOG entry on every release - sent as X-Client-Version
     // on fetch-based requests so BOSS can see which SDK version is actually in use (BOSS
     // project 43 feature #113). Single source of truth - sdk.version below reads this too.
-    var SDK_VERSION = '0.1.0';
+    var SDK_VERSION = '0.2.0';
     var readyCallbacks = [];
     var isReady = false;
 
@@ -270,6 +270,44 @@
         return out;
     }
 
+    // ---- Forms --------------------------------------------------------------
+
+    // BOSS project 43 feature #127: unify the lead_capture integration's embed-key
+    // form submission under the JS SDK's object/event vocabulary, rather than every
+    // page hand-rolling its own fetch() + org_id/form_id plumbing. Hits the existing
+    // public www/api/lead_capture/submit.php endpoint directly (org_id + form_id
+    // query params, field values in the body) - no new BOSS-side route needed, since
+    // that endpoint is already public/CORS-open by design for embed use.
+    function formsSubmitUrl(config) {
+        return config.baseUrl.replace(/\/api\/v2\/?$/, '') + '/api/lead_capture/submit.php';
+    }
+
+    function buildForms(config, sdk) {
+        return {
+            submit: function (formId, data) {
+                var url = formsSubmitUrl(config) + '?org_id=' + encodeURIComponent(config.orgId) + '&form_id=' + encodeURIComponent(formId);
+                return fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data || {}),
+                })
+                    .then(function (r) { return r.json().then(function (body) { return { ok: r.ok, body: body }; }); })
+                    .then(function (result) {
+                        if (result.ok && result.body && result.body.success) {
+                            dispatchEvent(config, 'lead-captured', { formId: formId, leadId: result.body.lead_id, source: 'form' });
+                        } else {
+                            dispatchEvent(config, 'error', { source: 'forms', formId: formId, message: (result.body && result.body.error) || 'Form submission failed' });
+                        }
+                        return result.body;
+                    })
+                    .catch(function (err) {
+                        dispatchEvent(config, 'error', { source: 'forms', formId: formId, message: String(err && err.message || err) });
+                        return null;
+                    });
+            },
+        };
+    }
+
     // ---- Chat widget -----------------------------------------------------------
 
     function chatFrameUrl(config, visitorId) {
@@ -427,6 +465,10 @@
 
         var sdk = buildSdk(config);
         window.ZeroAI = sdk;
+
+        // Forms module - always available, no separate opt-in module flag (matches
+        // sdk.track.* always being available regardless of data-modules).
+        sdk.forms = buildForms(config, sdk);
 
         // Chat widget: mount when 'chat' or 'auto' module is enabled.
         if (config.clientId && (config.modules.indexOf('auto') !== -1 || config.modules.indexOf('chat') !== -1)) {

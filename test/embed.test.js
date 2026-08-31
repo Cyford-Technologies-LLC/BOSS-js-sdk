@@ -24,7 +24,7 @@ function loadEmbed(scriptAttrs) {
     const fetchCalls = [];
     window.fetch = function (url, init) {
         fetchCalls.push({ url, init });
-        return Promise.resolve({ ok: true });
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
     };
 
     const beaconCalls = [];
@@ -137,6 +137,39 @@ test('a failed tracking fetch dispatches zeroai:error instead of throwing', asyn
     await window.ZeroAI.track.identify({ identity_type: 'email' });
     assert.equal(errorDetail.source, 'track');
     assert.equal(errorDetail.path, '/track/visitor-identity');
+});
+
+// BOSS project 43 feature #127 - forms module unifies lead_capture's public embed
+// submission endpoint under the JS SDK's object/event vocabulary.
+test('forms.submit() posts to the lead_capture endpoint with org_id and form_id in the URL', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'org-42' });
+    const fetchCountBefore = fetchCalls.length;
+    await window.ZeroAI.forms.submit(7, { email: 'a@b.com' });
+    assert.equal(fetchCalls.length, fetchCountBefore + 1);
+    const call = fetchCalls[fetchCalls.length - 1];
+    assert.equal(call.url, 'https://zeroaiboss.com/api/lead_capture/submit.php?org_id=org-42&form_id=7');
+    assert.deepEqual(JSON.parse(call.init.body), { email: 'a@b.com' });
+});
+
+test('forms.submit() dispatches zeroai:lead-captured on success', async () => {
+    const { window } = await loadEmbed({ 'client-id': 'org-42' });
+    window.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, lead_id: 99 }) });
+    let detail = null;
+    window.document.addEventListener('zeroai:lead-captured', (e) => { detail = e.detail; });
+    await window.ZeroAI.forms.submit(7, { email: 'a@b.com' });
+    assert.equal(detail.formId, 7);
+    assert.equal(detail.leadId, 99);
+    assert.equal(detail.source, 'form');
+});
+
+test('forms.submit() dispatches zeroai:error instead of throwing on a server-side rejection', async () => {
+    const { window } = await loadEmbed({ 'client-id': 'org-42' });
+    window.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ success: false, error: 'Field "Email" is required' }) });
+    let errorDetail = null;
+    window.document.addEventListener('zeroai:error', (e) => { errorDetail = e.detail; });
+    await window.ZeroAI.forms.submit(7, {});
+    assert.equal(errorDetail.source, 'forms');
+    assert.equal(errorDetail.message, 'Field "Email" is required');
 });
 
 test('loading the script twice on the same page is a no-op the second time', async () => {
