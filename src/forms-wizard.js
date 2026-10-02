@@ -158,15 +158,24 @@
         var fieldEls = {};
         for (var i = 0; i < page.fields.length; i++) {
             var field = page.fields[i];
+
+            // 'description' is a static instructional block (FormFieldTypeCatalog, ZeroAI-CRM
+            // repo, task 140 follow-up) -- never a label/input, never part of fieldEls, never
+            // submitted. Render its label as plain text and move on.
+            if (field.field_type === 'description') {
+                form.appendChild(el('p', { 'class': 'zeroai-wizard-field-description', text: field.label }));
+                continue;
+            }
+
             var wrap = el('div', { 'class': 'zeroai-wizard-field' });
             var label = el('label', { 'for': 'zw_' + field.field_key, text: field.label + (field.required ? ' *' : '') });
             wrap.appendChild(label);
 
             var input = this.buildInput(field);
             // Pre-fill from formData (resume auto-fill, or a value carried forward from a
-            // previous page) -- never for a file input, which browsers never allow setting
-            // .value on programmatically, for obvious security reasons.
-            if (field.field_type !== 'file' && this.formData[field.field_key] !== undefined) {
+            // previous page) -- never for a file input (browsers block setting .value on one
+            // programmatically) or a 'list' checklist (its own container, no single .value).
+            if (field.field_type !== 'file' && field.field_type !== 'list' && this.formData[field.field_key] !== undefined) {
                 input.value = this.formData[field.field_key];
             }
             wrap.appendChild(input);
@@ -227,6 +236,23 @@
             cb.type = 'checkbox';
             return cb;
         }
+        if (field.field_type === 'list') {
+            // Checklist (pick any number) -- a container of checkboxes, not a single input.
+            // Flagged with .zeroaiListField so submitPage() knows to collect an array of the
+            // checked values instead of reading a single .value/.checked.
+            var listWrap = el('div', { id: id, 'class': 'zeroai-wizard-list' });
+            listWrap.zeroaiListField = true;
+            for (var i = 0; i < (field.options || []).length; i++) {
+                var optId = id + '_' + i;
+                var optLabel = el('label', { 'class': 'zeroai-wizard-list-option', 'for': optId });
+                var optCb = el('input', { id: optId, name: field.field_key, value: field.options[i] });
+                optCb.type = 'checkbox';
+                optLabel.appendChild(optCb);
+                optLabel.appendChild(document.createTextNode(' ' + field.options[i]));
+                listWrap.appendChild(optLabel);
+            }
+            return listWrap;
+        }
         if (field.field_type === 'file') {
             var fileInput = el('input', common);
             fileInput.type = 'file';
@@ -282,7 +308,15 @@
                 fileFields.push(key);
                 continue;
             }
-            if (input.type === 'checkbox') {
+            if (input.zeroaiListField) {
+                var checked = [];
+                var boxes = input.querySelectorAll('input[type=checkbox]');
+                for (var b = 0; b < boxes.length; b++) {
+                    if (boxes[b].checked) { checked.push(boxes[b].value); }
+                }
+                values[key] = checked;
+                this.formData[key] = checked;
+            } else if (input.type === 'checkbox') {
                 values[key] = input.checked ? '1' : '';
             } else {
                 values[key] = input.value;
