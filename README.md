@@ -20,14 +20,22 @@ regardless of where the source lives, and there's little reason to gate it
 behind the main repo's access - see `www/dev-clients/README.md` there for the
 full cross-cutting decisions this was planned against.
 
-## Status (2026-08-29)
+## Status (2026-10-01)
 
-`src/embed.js` - the loader/bootstrap, visitor tracking module, and
-CustomEvents are built and tested (`npm test`, 11/11 passing). Not yet built:
-the chat widget (`zeroai:chat-opened` is a reserved event name, not dispatched
-by anything yet), marketing-capture UI, and Web-Components-based rendering
-(nothing in this SDK renders UI onto the page yet - it's tracking-only so
-far).
+`src/embed.js` - the loader/bootstrap and visitor tracking module are built and tested (`npm
+test`, 11/11 passing -- tests cover tracking/events only, not the modules added after). Also
+built since this note was last accurate (BOSS project 43): a chat widget (`sdk.chat`, an iframe
+launcher + overlay), lead_capture form submission (`sdk.forms.submit`), web push config
+(`sdk.push.getWebConfig`), browser error reporting (`sdk.errors`), and funnel events
+(`sdk.funnels.event`). None of these newer modules have automated tests yet.
+
+`src/forms-wizard.js` (new, BOSS project 50 task 140, loaded as a separate sibling script after
+embed.js) adds `sdk.forms.renderWizard(selector, { publicKey })`: a multi-page, Indeed-style
+application wizard against ZeroAI-CRM's generic Form Builder public API. Renders every field
+type Form Builder supports, walks a multi-phase flow's chained pages automatically (one
+`GET .../flow` call describes every page up front), uploads file fields via a separate
+multipart endpoint, and silently/best-effort auto-fills matching fields from an uploaded resume
+via a local-LLM extraction endpoint. No automated tests yet.
 
 ## Technology
 
@@ -58,6 +66,8 @@ Set via `data-*` attributes on the script tag:
 | `data-modules` | Comma-separated module opt-in/out, or `auto` (default) to load whatever's enabled. Currently only affects whether the automatic page-view fire happens on load. |
 | `data-locale` | Defaults to `navigator.language`. |
 | `data-theme-*` | Reserved for future widget theming tokens (e.g. `data-theme-primary-color`) - collected into `window.ZeroAI.config.theme` already, not consumed by anything yet since there's no UI to theme. |
+| `data-chat-agent-id` | Optional agent id passed to the chat widget's iframe, binding the launcher to one specific agent instead of the tenant's default. |
+| `data-company-id` | Optional company scope passed to `sdk.push`/error reporting for a multi-company tenant. |
 
 ## API
 
@@ -78,6 +88,33 @@ Every `track.*` call automatically fills in `org_id` (from `data-client-id`),
 `page_url`, `referrer`, `visitor_object_id`, and `fingerprint_hash` unless you
 pass your own values for those keys.
 
+Also available, each its own module built since the table above was last fully accurate:
+
+```js
+window.ZeroAI.forms.submit(formId, data);        // POST /api/lead_capture/submit.php
+window.ZeroAI.push.getWebConfig();               // GET /firebase/web-config
+window.ZeroAI.errors.report({ message, stack }); // POST /errors/browser (also auto-installed on window.onerror if the 'errors'/'auto' module is enabled)
+window.ZeroAI.funnels.event('page_visit', {...}); // POST /funnels/event/browser
+window.ZeroAI.chat.open();                       // opens the floating chat launcher/overlay (mounted automatically if the 'chat'/'auto' module is enabled and data-client-id is set)
+```
+
+`src/forms-wizard.js` (load as a separate `<script>` tag after embed.js) adds:
+
+```js
+window.ZeroAI.ready(function (sdk) {
+  sdk.forms.renderWizard('#apply-here', {
+    publicKey: 'THE_JOB_APPLICATION_PUBLIC_KEY', // from ZeroAI-CRM's HR "Build Application Form" panel
+    onSubmit: function (result) { /* result.submissionId */ },
+  });
+});
+```
+
+Renders a multi-step form (one step per page of the application flow), walking `next_form_id`
+chaining automatically via one `GET .../flow` call, submitting each page as the applicant
+advances, uploading any file fields, and -- on a file field change -- silently attempting resume
+auto-fill against the WHOLE flow's fields (not just the current page), pre-filling whatever it
+finds without ever overwriting a field the applicant already typed into.
+
 ## Events
 
 `CustomEvent`s dispatched on `document`, so a host page's own analytics or
@@ -85,11 +122,15 @@ marketing code can react without polling anything:
 
 - `zeroai:ready` - fires once, after init.
 - `zeroai:visitor-identified` - after a successful `track.identify()`.
-- `zeroai:lead-captured` - after a successful `track.bindLead()`.
-- `zeroai:error` - a tracking call failed (network error). Never thrown -
-  the SDK is designed to never break the host page.
-- `zeroai:chat-opened` - **reserved**, not dispatched yet (no chat widget
-  built).
+- `zeroai:lead-captured` - after a successful `track.bindLead()` OR `forms.submit()`.
+- `zeroai:error` - a tracking/module call failed (network error, or a forms-wizard page
+  rejected by the server). Never thrown - the SDK is designed to never break the host page.
+- `zeroai:chat-opened` / `zeroai:chat-closed` - the chat launcher/overlay was opened/closed.
+- `zeroai:application-submitted` (forms-wizard.js) - the LAST page of an application flow was
+  submitted successfully. `detail: { publicKey, submissionId }`.
+- `zeroai:resume-parsed` (forms-wizard.js) - a resume auto-fill attempt returned at least an
+  empty result (check `detail.appliedToVisibleFields.length` for whether anything was actually
+  filled in). `detail: { fields, appliedToVisibleFields }`.
 
 ## Testing
 
