@@ -66,6 +66,14 @@ test('reads config from data-* attributes on the script tag', async () => {
     assert.equal(window.ZeroAI.config.locale, 'fr');
 });
 
+test('external tracking identifies the registered client separately from its tenant', async () => {
+    const { window, fetchCalls } = await loadEmbed({ 'client-id': 'store-client', 'org-id': 'tenant-42', 'company-id': '42', modules: 'tracking' });
+    assert.ok(fetchCalls.length > 0);
+    assert.match(fetchCalls[0].url, /client_id=store-client/);
+    assert.equal(JSON.parse(fetchCalls[0].init.body).org_id, 'tenant-42');
+    window.close();
+});
+
 test('warns but does not throw when data-client-id is missing', async () => {
     const { window } = await loadEmbed({});
     assert.equal(window.ZeroAI.config.orgId, '');

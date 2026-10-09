@@ -32,7 +32,7 @@
     // Bump alongside the git tag/CHANGELOG entry on every release - sent as X-Client-Version
     // on fetch-based requests so BOSS can see which SDK version is actually in use (BOSS
     // project 43 feature #113). Single source of truth - sdk.version below reads this too.
-    var SDK_VERSION = '0.5.0';
+    var SDK_VERSION = '0.5.1';
     var readyCallbacks = [];
     var isReady = false;
 
@@ -53,6 +53,8 @@
         }
         return null;
     }
+
+    var bootstrapTag = currentScriptTag();
 
     function readConfig(tag) {
         var data = (tag && tag.dataset) || {};
@@ -139,9 +141,16 @@
 
     // ---- Transport --------------------------------------------------------
 
+    function publicApiUrl(config, path) {
+        var url = config.baseUrl + path;
+        return config.clientId && config.orgId !== config.clientId
+            ? url + (url.indexOf('?') === -1 ? '?' : '&') + 'client_id=' + encodeURIComponent(config.clientId)
+            : url;
+    }
+
     function sendTrackingRequest(config, path, payload, useBeacon) {
         var body = JSON.stringify(mergeTenantIdentity(config, payload));
-        var url = config.baseUrl + path;
+        var url = publicApiUrl(config, path);
 
         if (useBeacon && navigator.sendBeacon) {
             var blob = new Blob([body], { type: 'application/json' });
@@ -322,7 +331,7 @@
     function buildPush(config) {
         return {
             getWebConfig: function () {
-                var url = config.baseUrl + '/firebase/web-config?org_id=' + encodeURIComponent(config.orgId)
+                var url = publicApiUrl(config, '/firebase/web-config?org_id=' + encodeURIComponent(config.orgId))
                     + (config.companyId ? '&company_id=' + encodeURIComponent(config.companyId) : '');
                 return fetch(url)
                     .then(function (r) { return r.json(); })
@@ -361,7 +370,7 @@
             if (config.companyId) {
                 payload.company_id = config.companyId;
             }
-            return fetch(config.baseUrl + '/errors/browser', {
+            return fetch(publicApiUrl(config, '/errors/browser'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -421,7 +430,7 @@
                     event_type: eventType,
                     fingerprint_hash: visitorId,
                 }, data || {}));
-                return fetch(config.baseUrl + '/funnels/event/browser', {
+                return fetch(publicApiUrl(config, '/funnels/event/browser'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
@@ -448,6 +457,9 @@
             + '&visitor_id=' + encodeURIComponent(visitorId);
         if (config.chatAgentId) {
             url += '&agent_id=' + encodeURIComponent(config.chatAgentId);
+        }
+        if (config.companyId) {
+            url += '&company_id=' + encodeURIComponent(config.companyId);
         }
         return url;
     }
@@ -489,7 +501,7 @@
             overlayEl.setAttribute('aria-label', 'Chat');
             overlayEl.style.cssText = [
                 'position:fixed', 'bottom:84px', 'right:20px', 'z-index:2147483645',
-                'width:360px', 'height:520px', 'border-radius:12px',
+                'width:min(360px,calc(100vw - 24px))', 'height:min(520px,calc(100dvh - 110px))', 'border-radius:8px',
                 'box-shadow:0 8px 32px rgba(0,0,0,.18)',
                 'overflow:hidden', 'display:none',
                 'border:1px solid rgba(0,0,0,.08)',
@@ -498,6 +510,7 @@
             iframeEl = document.createElement('iframe');
             iframeEl.src = chatFrameUrl(config, sdk.visitorId);
             iframeEl.title = 'Chat';
+            iframeEl.referrerPolicy = 'origin';
             iframeEl.setAttribute('aria-label', 'Chat with us');
             iframeEl.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
             iframeEl.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
@@ -575,7 +588,7 @@
     // ---- Bootstrap ------------------------------------------------------------
 
     function init() {
-        var config = readConfig(currentScriptTag());
+        var config = readConfig(bootstrapTag);
 
         if (!config.orgId) {
             // Fail loud in the console (a silently-inert pixel is a worse debugging

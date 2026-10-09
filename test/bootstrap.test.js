@@ -1,0 +1,28 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { JSDOM } = require('jsdom');
+test('deferred bootstrap preserves the embedding script config after currentScript changes', async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://shop.example/', runScripts: 'dangerously' });
+    const window = dom.window;
+    window.fetch = () => Promise.resolve({ ok: true });
+    window.navigator.sendBeacon = () => true;
+    const tag = window.document.createElement('script');
+    tag.dataset.clientId = 'store-client'; tag.dataset.orgId = 'tenant-42'; tag.dataset.companyId = '42'; tag.dataset.chatAgentId = '17'; tag.dataset.modules = 'chat';
+    tag.src = 'https://shop.example/index.php?route=extension/module/boss_connector/asset&asset=embed.js';
+    window.document.body.appendChild(tag);
+    Object.defineProperty(window.document, 'currentScript', { value: tag, configurable: true });
+    window.eval(fs.readFileSync(path.join(__dirname, '../src/embed.js'), 'utf8'));
+    Object.defineProperty(window.document, 'currentScript', { value: null, configurable: true });
+    if (window.document.readyState === 'loading') await new Promise(resolve => window.document.addEventListener('DOMContentLoaded', resolve));
+    assert.equal(window.ZeroAI.config.orgId, 'tenant-42');
+    const frame = window.document.querySelector('#zeroai-chat-overlay iframe');
+    assert.match(frame.src, /client_id=store-client/);
+    assert.match(frame.src, /agent_id=17/);
+    assert.match(frame.src, /company_id=42/);
+    assert.equal(frame.referrerPolicy, 'origin');
+    assert.match(window.document.getElementById('zeroai-chat-overlay').style.width, /100vw/);
+    window.close();
+});

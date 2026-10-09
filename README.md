@@ -1,7 +1,7 @@
 # ZeroAI BOSS - JS SDK
 
 Universal JS embed client for third-party websites - visitor tracking,
-marketing widgets, and (planned) AI chat. Installable on a static HTML site, a
+marketing widgets, and AI chat. Installable on a static HTML site, a
 Shopify store, a React app, or WordPress with zero framework collisions.
 
 ```html
@@ -20,14 +20,25 @@ regardless of where the source lives, and there's little reason to gate it
 behind the main repo's access - see `www/dev-clients/README.md` there for the
 full cross-cutting decisions this was planned against.
 
-## Status (2026-10-01)
+## External Store Configuration (0.5.1)
+
+Set `data-client-id` to the registered store API client key, `data-org-id` to
+its BOSS organization, and `data-company-id` to its company. Configure the
+storefront hostname in the client's allowed origins. Public tracking, error,
+funnel and push-config requests identify that client separately from the tenant;
+the companion BOSS API must include registered-client external-domain CORS.
+Never put the client secret in script attributes. Chat additionally requires
+`data-chat-agent-id` and BOSS's signed chat embed-context endpoint.
+
+## Status (2026-10-08)
 
 `src/embed.js` - the loader/bootstrap and visitor tracking module are built and tested (`npm
-test`, 11/11 passing -- tests cover tracking/events only, not the modules added after). Also
+test`, 40 tests passing, including deferred embeds, external-store identity and chat). Also
 built since this note was last accurate (BOSS project 43): a chat widget (`sdk.chat`, an iframe
 launcher + overlay), lead_capture form submission (`sdk.forms.submit`), web push config
 (`sdk.push.getWebConfig`), browser error reporting (`sdk.errors`), and funnel events
-(`sdk.funnels.event`). None of these newer modules have automated tests yet.
+(`sdk.funnels.event`). Tests cover these modules; Form Builder wizard browser
+validation and provider-backed chat remain deployment-specific checks.
 
 `src/forms-wizard.js` (new, BOSS project 50 task 140, loaded as a separate sibling script after
 embed.js) adds `sdk.forms.renderWizard(selector, { publicKey })`: a multi-page, Indeed-style

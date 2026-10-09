@@ -1,6 +1,6 @@
 {
   "name": "@zeroai/boss-js-sdk",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "ZeroAI BOSS embeddable JS SDK - visitor tracking, marketing widgets, AI chat for third-party websites.",
   "private": true,
   "main": "src/embed.js",
@@ -9,7 +9,7 @@
     "dist"
   ],
   "scripts": {
-    "test": "node --test test/embed.test.js test/chat.test.js"
+    "test": "node --test test/embed.test.js test/chat.test.js test/bootstrap.test.js"
   },
   "devDependencies": {
     "jsdom": "^25.0.1"
